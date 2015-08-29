@@ -1,11 +1,12 @@
 package com.polymorphic_solutions.popularmovies;
 
-import android.graphics.Movie;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.util.Log;
 
+import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -13,34 +14,44 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Created by cmorgan on 8/22/15.
  *
- * AsyncTask fo retreiving Movie Information and Posters
+ * AsyncTask fo retreiving MovieInfo Information and Posters
  */
-public class FetchMoviePostersTask extends AsyncTask<String, Void, List<Movie>> {
+public class FetchMoviePostersTask extends AsyncTask<String, Void, List<MovieInfo>> {
     private static final String LOG_TAG = FetchMoviePostersTask.class.getSimpleName();
-    private static final String TMDB_API_KEY = "f311557990ffbd2236fc2a463de956a9";
+
+    private FetchResponse delegate;
+
+    private static final String TMDB_API_KEY = "";      // You can get this from tmdb.org...
     private static final String POSTER_SIZE = "w185";
     private static final Uri    POSTER_BASE_URI = Uri.parse("http://image.tmdb.org/t/p/");
     private static final Uri    MOVIE_BASE_URI = Uri.parse("http://api.themoviedb.org/3/discover/movie?");
 
-    public FetchMoviePostersTask() {
-        super();
+    public FetchMoviePostersTask(FetchResponse delegate) {
+        this.delegate = delegate;
     }
 
     @Override
-    protected void onPostExecute(List<Movie> movies) {
-        super.onPostExecute(movies);
+    protected void onPostExecute(List<MovieInfo> movies) {
+        if (movies != null && movies.size() > 0){
+            delegate.onFetchCompleted(movies);
+        }
     }
 
     @Override
-    protected List<Movie> doInBackground(String... params) {
+    protected List<MovieInfo> doInBackground(String... params) {
         // First we need to make sure we have been params we need
-        if (params.length == null){
-            Log.e(LOG_TAG, "Proc: doInBackground -- Not fed the required parameter");
+        if (params.length == 0){
+            Log.d(LOG_TAG, "Proc: doInBackground -- No sort order specified");
             return null;
         }
 
@@ -103,12 +114,55 @@ public class FetchMoviePostersTask extends AsyncTask<String, Void, List<Movie>> 
         try {
             return processJsonData(jsonData);
         }catch (JSONException e){
-            Log.e(LOG_TAG, "There was an error processing the JSON Data: " e);
+            Log.e(LOG_TAG, "There was an error processing the JSON Data: " + e);
             return null;
         }
     }
 
-    private List<Movie> processJsonData(String jsonData) throws JSONException {
+    private String getYearFromDate(String date){
+        final SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+        final Calendar cal = Calendar.getInstance();
+        try {
+            cal.setTime(df.parse(date));
+            return Integer.toString(cal.get(Calendar.YEAR));
+        }catch(ParseException e){
+            Log.d(LOG_TAG, "There was a issue parsing the YEAR from " + date + " --> " +e);
+            return null;
+        }
+    }
 
+    private List<MovieInfo> processJsonData(String jsonData) throws JSONException {
+        // the items we need to parse out of the Data
+        final String MOVIES = "results";
+        final String TITLE = "original_title";
+        final String SUMMARY = "overview";
+        final String RATING = "vote_average";
+        final String RELEASED = "release_date";
+        final String POSTER_URL = "poster_path";
+
+        JSONObject object = new JSONObject(jsonData);
+        JSONArray  movieArray = object.getJSONArray(MOVIES);
+        int movieCount = movieArray.length();
+        List<MovieInfo> movies = new ArrayList<MovieInfo>();
+
+        for (int x = 0; x < movieCount; x++){
+            JSONObject movie = movieArray.getJSONObject(x);
+            String title = movie.getString(TITLE);
+            String summary = movie.getString(SUMMARY);
+            String rating = movie.getString(RATING);
+            String releaseYear = getYearFromDate(movie.getString(RELEASED));
+            Uri poster = POSTER_BASE_URI.buildUpon()
+                    .appendEncodedPath(POSTER_SIZE)
+                    .appendEncodedPath(movie.getString(POSTER_URL))
+                    .build();
+
+            movies.add(new MovieInfo(title, summary, rating, releaseYear, poster));
+        }
+
+        return movies;
+    }
+
+    public interface FetchResponse {
+        void onFetchCompleted(List<MovieInfo> movies);
     }
 }
